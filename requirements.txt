@@ -1,0 +1,5 @@
+python-dotenv
+pipecat-ai[cartesia,openai,silero,websocket,deepgram]
+firebase-admin
+loguru
+supervisor
