@@ -10,12 +10,14 @@ from firebase_admin import credentials, firestore
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
+from pipecat.clocks.system_clock import SystemClock
+from pipecat.frames.frames import StartFrame, EndFrame
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.logger import FrameLogger
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.openai import OpenAILLMContext, OpenAILLMService,OpenAILLMContextFrame
+from pipecat.services.deepgram import DeepgramSTTService, DeepgramTTSService
+from pipecat.services.openai import OpenAILLMContext, OpenAILLMService, OpenAILLMContextFrame
 from websocket_server import WebsocketServerParams, WebsocketServerTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -61,7 +63,7 @@ class IntakeProcessor:
     async def verify_birthday(
         self, function_name, tool_call_id, args, llm, context, result_callback
     ):
-        if args["birthday"] == "1990-01-01":
+        if args["birthday"] == "1983-01-01":
             context.set_tools(
                 [
                     {
@@ -94,6 +96,10 @@ class IntakeProcessor:
                     }
                 ]
             )
+            # It's a bit weird to push this to the LLM, but it gets it into the pipeline
+            # await llm.push_frame(sounds["ding2.wav"], FrameDirection.DOWNSTREAM)
+            # We don't need the function call in the context, so just return a new
+            # system message and let the framework re-prompt
             await result_callback(
                 [
                     {
@@ -103,6 +109,7 @@ class IntakeProcessor:
                 ]
             )
         else:
+            # The user provided an incorrect birthday; ask them to try again
             await result_callback(
                 [
                     {
@@ -114,6 +121,7 @@ class IntakeProcessor:
 
     async def start_prescriptions(self, function_name, llm, context):
         print(f"!!! doing start prescriptions")
+        # Move on to allergies
         context.set_tools(
             [
                 {
@@ -154,6 +162,7 @@ class IntakeProcessor:
 
     async def start_allergies(self, function_name, llm, context):
         print("!!! doing start allergies")
+        # Move on to conditions
         context.set_tools(
             [
                 {
@@ -192,6 +201,7 @@ class IntakeProcessor:
 
     async def start_conditions(self, function_name, llm, context):
         print("!!! doing start conditions")
+        # Move on to visit reasons
         context.set_tools(
             [
                 {
@@ -230,12 +240,13 @@ class IntakeProcessor:
 
     async def start_visit_reasons(self, function_name, llm, context):
         print("!!! doing start visit reasons")
+        # move to finish call
         context.set_tools([])
         context.add_message(
             {"role": "system", "content": "Now, thank the user and end the conversation."}
         )
-        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
-
+        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)    
+        
     async def save_data(self, function_name, tool_call_id, args, llm, context, result_callback):
         logger.info(f"Saving data: {args}")
         
@@ -255,69 +266,84 @@ class IntakeProcessor:
         logger.info(f"Data saved to Firebase for function: {function_name}")
         await result_callback(None)
 
-    
-
 async def main():
     transport = WebsocketServerTransport(
         params=WebsocketServerParams(
             host="",
             port=int(os.environ["PORT"]),
             audio_out_enabled=True,
-            add_wav_header=False,
+            add_wav_header=True,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
-            ssl_key_path="/live/www.allenmylath.run.place/privkey.pem",
-            ssl_cert_path="/live/www.allenmylath.run.place/fullchain.pem"
-
         )
     )
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model="gpt-4o"
+    )
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+        voice_id="829ccd10-f8b3-43cd-b8a0-4aeaa81f3b30",  # British Lady
     )
 
     messages = []
     context = OpenAILLMContext(messages=messages)
     context_aggregator = llm.create_context_aggregator(context)
-
     intake = IntakeProcessor(context)
+
+    # Register functions
     llm.register_function("verify_birthday", intake.verify_birthday)
     llm.register_function(
-        "list_prescriptions", intake.save_data, start_callback=intake.start_prescriptions
+        "list_prescriptions",
+        intake.save_data,
+        start_callback=intake.start_prescriptions
     )
     llm.register_function(
-        "list_allergies", intake.save_data, start_callback=intake.start_allergies
+        "list_allergies",
+        intake.save_data,
+        start_callback=intake.start_allergies
     )
     llm.register_function(
-        "list_conditions", intake.save_data, start_callback=intake.start_conditions
+        "list_conditions",
+        intake.save_data,
+        start_callback=intake.start_conditions
     )
     llm.register_function(
-        "list_visit_reasons", intake.save_data, start_callback=intake.start_visit_reasons
+        "list_visit_reasons",
+        intake.save_data,
+        start_callback=intake.start_visit_reasons
     )
 
     fl = FrameLogger("LLM Output")
 
-    pipeline = Pipeline(
-        [
-            transport.input(),  # WebSocket input
-            stt,  # Speech-To-Text
-            context_aggregator.user(),  # User responses
-            llm,  # LLM
-            fl,  # Frame logger
-            tts,  # Text-To-Speech
-            transport.output(),  # WebSocket output
-            context_aggregator.assistant(),  # Assistant responses
-        ]
-    )
+    pipeline = Pipeline([
+        transport.input(),  # WebSocket input
+        stt,  # Speech-To-Text
+        context_aggregator.user(),  # User responses
+        llm,  # LLM
+        fl,  # Frame logger
+        tts,  # Text-To-Speech
+        transport.output(),  # WebSocket output
+        context_aggregator.assistant(),  # Assistant responses
+    ])
 
     task = PipelineTask(pipeline, PipelineParams(allow_interruptions=False))
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        print(f"Context is: {context}")
+        # Clear existing messages and create new context
+        context.messages.clear()
+               
+        # Reinitialize IntakeProcessor with fresh context
+        intake = IntakeProcessor(context)
+        
+        # Reset context aggregator with fresh context
+        context_aggregator = llm.create_context_aggregator(context)
+        
+        print(f"New client connected. Fresh context created: {context}")
         await task.queue_frames([OpenAILLMContextFrame(context)])
 
     runner = PipelineRunner()
