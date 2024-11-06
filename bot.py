@@ -19,7 +19,7 @@ from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService, DeepgramTTSService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMService, OpenAILLMContextFrame
 from websocket_server import WebsocketServerParams, WebsocketServerTransport
-from pipecat.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 
 load_dotenv(override=True)
 
