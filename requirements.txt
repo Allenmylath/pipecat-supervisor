@@ -1,5 +1,5 @@
 python-dotenv
-pipecat-ai[cartesia,openai,silero,websocket,deepgram]
+pipecat-ai[cartesia,openai,silero,websocket,deepgram,noisereduce]
 firebase-admin
 loguru
 supervisor
