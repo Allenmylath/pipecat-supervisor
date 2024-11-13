@@ -20,7 +20,7 @@ from pipecat.services.deepgram import DeepgramSTTService, DeepgramTTSService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMService, OpenAILLMContextFrame
 from websocket_server import WebsocketServerParams, WebsocketServerTransport
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.filters.krisp_filter import KrispFilter
+from pipecat.audio.filters.noisereduce_filter import NoisereduceFilter
 
 load_dotenv(override=True)
 
@@ -277,7 +277,7 @@ async def main():
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
-            audio_in_filter=KrispFilter(),
+            audio_in_filter=NoisereduceFilter(),
         )
     )
 
