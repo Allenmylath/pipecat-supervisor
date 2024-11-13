@@ -20,7 +20,7 @@ from pipecat.services.deepgram import DeepgramSTTService, DeepgramTTSService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMService, OpenAILLMContextFrame
 from websocket_server import WebsocketServerParams, WebsocketServerTransport
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.filters.noisereduce_filter import NoisereduceFilter
+from noisereduce_filter import NoisereduceFilter
 
 load_dotenv(override=True)
 
