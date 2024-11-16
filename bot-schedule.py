@@ -2,25 +2,12 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 import os
-import pytz
 
 class IntakeProcessor:
     def __init__(self, context: OpenAILLMContext):
         print(f"Initializing context from IntakeProcessor")
         # Initialize calendar service
         self.calendar_service = self._init_calendar_service()
-        # Store doctor schedules - could be fetched from database
-        self.doctor_schedules = {
-            "primary": "primary_calendar_id",  # Main calendar
-            "Dr. Smith": "dr_smith_calendar_id",
-            "Dr. Johnson": "dr_johnson_calendar_id",
-            # Add more doctors as needed
-        }
-        self.APPOINTMENT_DURATION = 30  # minutes
-        self.WORKING_HOURS = {
-            'start': '09:00',
-            'end': '17:00'
-        }
         
         context.add_message(
             {
@@ -58,238 +45,246 @@ class IntakeProcessor:
         self, function_name, tool_call_id, args, llm, context, result_callback
     ):
         if args["birthday"] == "1990-01-01":
-            context.set_tools(
-                [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "check_department_availability",
-                            "description": "Check available departments and doctors",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "department": {
-                                        "type": "string",
-                                        "description": "Medical department name"
-                                    }
+            context.set_tools([
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "list_prescriptions",
+                        "description": "Once the user has provided a list of their prescription medications, call this function.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "prescriptions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "medication": {
+                                                "type": "string",
+                                                "description": "The medication's name",
+                                            },
+                                            "dosage": {
+                                                "type": "string",
+                                                "description": "The prescription's dosage",
+                                            },
+                                        },
+                                    },
+                                }
+                            },
+                        },
+                    }
+                }
+            ])
+            await result_callback([
+                {
+                    "role": "system",
+                    "content": "Ask the user to list their current prescriptions. Each prescription needs to have a medication name and a dosage. Do not call the list_prescriptions function with any unknown dosages.",
+                }
+            ])
+
+    async def start_prescriptions(self, function_name, llm, context):
+        print(f"!!! doing start prescriptions")
+        context.set_tools([
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_allergies",
+                    "description": "Once the user has provided a list of their allergies, call this function.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "allergies": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "description": "What the user is allergic to",
+                                        }
+                                    },
                                 },
-                                "required": ["department"]
                             }
-                        }
+                        },
+                    },
+                }
+            }
+        ])
+        context.add_message(
+            {
+                "role": "system",
+                "content": "Next, ask the user if they have any allergies. Once they have listed their allergies or confirmed they don't have any, call the list_allergies function.",
+            }
+        )
+        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+
+    async def start_conditions(self, function_name, llm, context):
+        print("!!! doing start conditions")
+        context.set_tools([
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_conditions",
+                    "description": "Once the user has provided a list of their medical conditions, call this function.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "conditions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "description": "The user's medical condition",
+                                        }
+                                    },
+                                },
+                            }
+                        },
+                    },
+                }
+            }
+        ])
+        context.add_message({
+            "role": "system",
+            "content": "Now ask the user if they have any medical conditions the doctor should know about. Once they've answered the question or confirmed they don't have any, call the list_conditions function.",
+        })
+        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+
+    async def start_visit_reasons(self, function_name, llm, context):
+        print("!!! doing start visit reasons")
+        context.set_tools([
+            {
+                "type": "function",
+                "function": {
+                    "name": "process_visit_reason",
+                    "description": "Process the visit reason and determine appropriate department",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "visit_reason": {
+                                "type": "string",
+                                "description": "The reason for visiting the doctor"
+                            }
+                        },
+                        "required": ["visit_reason"]
                     }
-                ]
-            )
-            await result_callback(
-                [
-                    {
-                        "role": "system",
-                        "content": "Great! Let's schedule your appointment. First, which department do you need to visit?? (Available departments: General Medicine, Cardiology, Orthopedics, Pediatrics)",
+                }
+            }
+        ])
+        context.add_message({
+            "role": "system",
+            "content": "Ask the user why they want to visit the doctor today. After they explain their condition, call the process_visit_reason function.",
+        })
+        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+
+    async def process_visit_reason(self, function_name, tool_call_id, args, llm, context, result_callback):
+        # Map conditions to departments
+        department = self.determine_department(args["visit_reason"])
+        
+        # Get available slots for the department
+        slots = await self.get_department_availability(department)
+        
+        context.set_tools([
+            {
+                "type": "function",
+                "function": {
+                    "name": "schedule_appointment",
+                    "description": "Schedule the appointment for the determined department",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "slot": {
+                                "type": "string",
+                                "description": "Selected time slot (YYYY-MM-DD HH:MM format)"
+                            },
+                            "department": {
+                                "type": "string",
+                                "description": "Medical department"
+                            }
+                        },
+                        "required": ["slot", "department"]
                     }
-                ]
-            )
+                }
+            }
+        ])
+
+        slots_formatted = "\n".join([f"- {slot}" for slot in slots])
+        await result_callback([
+            {
+                "role": "system",
+                "content": f"Based on your condition, I'll schedule you with our {department} department. Here are the available appointment slots:\n\n{slots_formatted}\n\nWhich time works best for you?? When the user selects a slot, call schedule_appointment with the chosen slot and department.",
+            }
+        ])
+
+    def determine_department(self, visit_reason):
+        """Determine appropriate department based on visit reason"""
+        reason_lower = visit_reason.lower()
+        
+        # Simple keyword matching - could be made more sophisticated
+        if any(word in reason_lower for word in ['heart', 'chest pain', 'blood pressure']):
+            return 'Cardiology'
+        elif any(word in reason_lower for word in ['bone', 'joint', 'back pain', 'muscle']):
+            return 'Orthopedics'
+        elif any(word in reason_lower for word in ['child', 'kid', 'baby']):
+            return 'Pediatrics'
         else:
-            await result_callback(
-                [
-                    {
-                        "role": "system",
-                        "content": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function.",
-                    }
-                ]
-            )
+            return 'General Medicine'
 
-    async def check_department_availability(self, function_name, tool_call_id, args, llm, context, result_callback):
-        department = args["department"]
-        # Get doctors for the department (could be fetched from a database)
-        department_doctors = self.get_department_doctors(department)
+    async def get_department_availability(self, department):
+        """Get available slots for the department"""
+        # Get next 5 business days
+        slots = []
+        current_date = datetime.now()
         
-        context.set_tools(
-            [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "get_available_slots",
-                        "description": "Get available appointment slots for a specific date range",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "doctor": {
-                                    "type": "string",
-                                    "description": "Selected doctor's name"
-                                },
-                                "preferred_date": {
-                                    "type": "string",
-                                    "description": "Preferred date in YYYY-MM-DD format"
-                                }
-                            },
-                            "required": ["doctor", "preferred_date"]
-                        }
-                    }
-                }
-            ]
-        )
-        
-        doctors_list = ", ".join(department_doctors)
-        await result_callback(
-            [
-                {
-                    "role": "system",
-                    "content": f"The available doctors in {department} are: {doctors_list}. Ask the user which doctor they prefer and their preferred appointment date??",
-                }
-            ]
-        )
-
-    async def get_available_slots(self, function_name, tool_call_id, args, llm, context, result_callback):
-        doctor = args["doctor"]
-        preferred_date = args["preferred_date"]
-        
-        # Get available time slots
-        available_slots = await self.find_available_slots(doctor, preferred_date)
-        
-        if not available_slots:
-            # No slots available, check next few days
-            next_available = await self.find_next_available_day(doctor, preferred_date)
-            await result_callback(
-                [
-                    {
-                        "role": "system",
-                        "content": f"I apologize, but there are no available slots with {doctor} on {preferred_date}. The next available date is {next_available}. Would you like to see the available times for that date?? (Please ask the user and then call get_available_slots with the new date if they agree)",
-                    }
-                ]
-            )
-            return
-
-        context.set_tools(
-            [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "schedule_appointment",
-                        "description": "Schedule the appointment with selected time slot",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "doctor": {
-                                    "type": "string",
-                                    "description": "Doctor's name"
-                                },
-                                "date": {
-                                    "type": "string",
-                                    "description": "Appointment date (YYYY-MM-DD)"
-                                },
-                                "time": {
-                                    "type": "string",
-                                    "description": "Selected time slot (HH:MM)"
-                                }
-                            },
-                            "required": ["doctor", "date", "time"]
-                        }
-                    }
-                }
-            ]
-        )
-
-        slots_formatted = ", ".join([slot.strftime("%I:%M %p") for slot in available_slots])
-        await result_callback(
-            [
-                {
-                    "role": "system",
-                    "content": f"The following time slots are available with {doctor} on {preferred_date}: {slots_formatted}. Which time would you prefer??",
-                }
-            ]
-        )
-
-    async def find_available_slots(self, doctor, date):
-        """Find available time slots for a given doctor and date"""
-        calendar_id = self.doctor_schedules.get(doctor)
-        if not calendar_id:
-            return []
-
-        start_time = f"{date}T{self.WORKING_HOURS['start']}:00"
-        end_time = f"{date}T{self.WORKING_HOURS['end']}:00"
-
-        # Get existing events
-        events_result = self.calendar_service.events().list(
-            calendarId=calendar_id,
-            timeMin=start_time,
-            timeMax=end_time,
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
-        events = events_result.get('items', [])
-
-        # Generate all possible slots
-        all_slots = []
-        current = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%S")
-        end = datetime.strptime(end_time, "%Y-%m-%dT%H:%M:%S")
-        
-        while current + timedelta(minutes=self.APPOINTMENT_DURATION) <= end:
-            slot_end = current + timedelta(minutes=self.APPOINTMENT_DURATION)
-            is_available = True
-            
-            # Check if slot conflicts with any existing event
-            for event in events:
-                event_start = datetime.fromisoformat(event['start'].get('dateTime', event['start'].get('date')))
-                event_end = datetime.fromisoformat(event['end'].get('dateTime', event['end'].get('date')))
-                
-                if (current >= event_start and current < event_end) or \
-                   (slot_end > event_start and slot_end <= event_end):
-                    is_available = False
-                    break
-            
-            if is_available:
-                all_slots.append(current)
-            
-            current += timedelta(minutes=self.APPOINTMENT_DURATION)
-
-        return all_slots
-
-    async def find_next_available_day(self, doctor, start_date):
-        """Find the next day with available slots"""
-        current_date = datetime.strptime(start_date, "%Y-%m-%d")
-        for _ in range(14):  # Look up to 14 days ahead
+        for _ in range(5):
+            if current_date.weekday() < 5:  # Monday to Friday
+                for hour in range(9, 17):  # 9 AM to 5 PM
+                    slot_time = current_date.replace(hour=hour, minute=0)
+                    # Check if slot is available in Google Calendar
+                    if await self.is_slot_available(department, slot_time):
+                        slots.append(slot_time.strftime("%Y-%m-%d %H:%M"))
             current_date += timedelta(days=1)
-            slots = await self.find_available_slots(doctor, current_date.strftime("%Y-%m-%d"))
-            if slots:
-                return current_date.strftime("%Y-%m-%d")
-        return None
+        
+        return slots
+
+    async def is_slot_available(self, department, slot_time):
+        """Check if a time slot is available in Google Calendar"""
+        try:
+            calendar_id = f"{department.lower()}@tricounty.com"
+            start_time = slot_time.isoformat() + 'Z'
+            end_time = (slot_time + timedelta(hours=1)).isoformat() + 'Z'
+            
+            events_result = self.calendar_service.events().list(
+                calendarId=calendar_id,
+                timeMin=start_time,
+                timeMax=end_time,
+                singleEvents=True
+            ).execute()
+            
+            return len(events_result.get('items', [])) == 0
+            
+        except Exception as e:
+            print(f"Error checking calendar availability: {e}")
+            return False
 
     async def schedule_appointment(self, function_name, tool_call_id, args, llm, context, result_callback):
         try:
-            doctor = args['doctor']
-            date = args['date']
-            time = args['time']
-
-            # Verify slot is still available
-            available_slots = await self.find_available_slots(doctor, date)
-            selected_time = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+            slot = datetime.strptime(args["slot"], "%Y-%m-%d %H:%M")
+            department = args["department"]
             
-            if selected_time not in available_slots:
-                await result_callback(
-                    [
-                        {
-                            "role": "system",
-                            "content": "I apologize, but that time slot is no longer available. Let me check for other available slots again. Please call get_available_slots with the same date.",
-                        }
-                    ]
-                )
-                return
-
-            # Create the calendar event
             event = {
-                'summary': f"Doctor Appointment - {doctor}",
-                'description': f"Patient: Chad Bailey",
+                'summary': f"{department} Appointment - Chad Bailey",
+                'description': "Regular checkup",
                 'start': {
-                    'dateTime': f"{date}T{time}:00",
+                    'dateTime': slot.isoformat(),
                     'timeZone': 'UTC',
                 },
                 'end': {
-                    'dateTime': (selected_time + timedelta(minutes=self.APPOINTMENT_DURATION)).isoformat(),
+                    'dateTime': (slot + timedelta(hours=1)).isoformat(),
                     'timeZone': 'UTC',
                 },
-                'attendees': [
-                    {'email': 'patient@example.com'},
-                    {'email': f"{doctor.lower().replace(' ', '.')}@tricounty.com"}
-                ],
                 'reminders': {
                     'useDefault': False,
                     'overrides': [
@@ -299,41 +294,42 @@ class IntakeProcessor:
                 },
             }
 
-            event = self.calendar_service.events().insert(
-                calendarId=self.doctor_schedules[doctor],
+            await self.calendar_service.events().insert(
+                calendarId=f"{department.lower()}@tricounty.com",
                 body=event,
                 sendUpdates='all'
             ).execute()
 
-            # Move to prescriptions after successful scheduling
-            context.set_tools([self.get_prescriptions_tool()])
-            await result_callback(
-                [
-                    {
-                        "role": "system",
-                        "content": f"Perfect! Your appointment has been scheduled with {doctor} on {date} at {time}. You'll receive a confirmation email shortly. Now, let me ask about your current prescriptions. Please list all your current medications with their dosages.",
-                    }
-                ]
-            )
+            # Move to finish
+            context.set_tools([])
+            await result_callback([
+                {
+                    "role": "system",
+                    "content": f"Perfect! I've scheduled your appointment with {department} for {args['slot']}. You'll receive a confirmation email shortly. Thank you for choosing Tri-County Health Services. Have a great day!",
+                }
+            ])
 
         except Exception as e:
-            await result_callback(
-                [
-                    {
-                        "role": "system",
-                        "content": "I apologize, but there was an error scheduling your appointment. Let's try again. Please call get_available_slots with your preferred date.",
-                    }
-                ]
-            )
+            await result_callback([
+                {
+                    "role": "system",
+                    "content": "I apologize, but there was an error scheduling your appointment. Please try selecting a different time slot.",
+                }
+            ])
 
-    def get_department_doctors(self, department):
-        """Get list of doctors for a department (demo data)"""
-        doctors = {
-            "General Medicine": ["Dr. Smith", "Dr. Johnson"],
-            "Cardiology": ["Dr. Chen", "Dr. Patel"],
-            "Orthopedics": ["Dr. Brown", "Dr. Davis"],
-            "Pediatrics": ["Dr. Wilson", "Dr. Garcia"]
-        }
-        return doctors.get(department, [])
+    async def save_data(self, function_name, tool_call_id, args, llm, context, result_callback):
+        logger.info(f"Saving data: {args}")
+        
+        user_ref = db.collection('users').document('chad_bailey')
 
-    # ... (rest of the original methods remain the same) ...
+        if function_name == "list_prescriptions":
+            user_ref.update({"prescriptions": args["prescriptions"]})
+        elif function_name == "list_allergies":
+            user_ref.update({"allergies": args["allergies"]})
+        elif function_name == "list_conditions":
+            user_ref.update({"conditions": args["conditions"]})
+        elif function_name == "process_visit_reason":
+            user_ref.update({"visit_reason": args["visit_reason"]})
+
+        logger.info(f"Data saved to Firebase for function: {function_name}")
+        await result_callback(None)
