@@ -195,7 +195,7 @@ class IntakeProcessor:
         context.add_message(
             {
                 "role": "system",
-                "content": "Now ask the user if they have any medical conditions the doctor should know about. Once they've answered the question, call the list_conditions function.",
+                "content": "Now ask the user if they have any medical conditions the doctor should know about. Once they've answered the question or confirmed they dont have any, call the list_conditions function.",
             }
         )
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
