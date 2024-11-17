@@ -246,7 +246,101 @@ class IntakeProcessor:
         context.add_message(
             {"role": "system", "content": "Now, thank the user and end the conversation."}
         )
-        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)    
+        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+    async def start_appointment_scheduling(self, function_name, llm, context):
+    # Initialize ClinicAppointment
+    clinic = ClinicAppointment()
+    
+    context.set_tools([
+        {
+            "type": "function",
+            "function": {
+                "name": "check_availability",
+                "description": "Check appointment availability for a given date",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "date": {
+                            "type": "string",
+                            "description": "The preferred date in YYYY-MM-DD format"
+                        }
+                    },
+                },
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "book_appointment_slot",
+                "description": "Book an appointment for a specific date and time",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "date": {
+                            "type": "string",
+                            "description": "The appointment date in YYYY-MM-DD format"
+                        },
+                        "time": {
+                            "type": "string",
+                            "description": "The appointment time in HH:MM format or HH:MM AM/PM format"
+                        }
+                    },
+                },
+            }
+        }
+    ])
+    
+    context.add_message({
+        "role": "system",
+        "content": "Now that we've collected your information, let's schedule your appointment. What date would you prefer for your visit?? When they provide a date, call the check_availability function with the date in YYYY-MM-DD format."
+    })
+    
+    await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+
+    async def check_availability(self, function_name, tool_call_id, args, llm, context, result_callback):
+        clinic = ClinicAppointment()
+        try:
+            date = datetime.strptime(args["date"], '%Y-%m-%d').date()
+            availability = clinic.get_available_slots(date)
+        
+            if "appointments available" in availability:
+                await result_callback([{
+                    "role": "system",
+                    "content": f"{availability} Which time slot would you prefer?? When they choose a time, call the book_appointment_slot function with the date and chosen time."
+                }])
+            else:
+                await result_callback([{
+                    "role": "system",
+                    "content": f"{availability}"
+                }])
+        except ValueError:
+            await result_callback([{
+                "role": "system",
+                "content": "I couldn't understand that date format. Please provide the date in YYYY-MM-DD format."
+            }])
+
+    async def book_appointment_slot(self, function_name, tool_call_id, args, llm, context, result_callback):
+        clinic = ClinicAppointment()
+        try:
+            date = datetime.strptime(args["date"], '%Y-%m-%d').date()
+            booking_result = clinic.book_appointment(date, args["time"])
+        
+            if "Great!" in booking_result:
+                context.set_tools([])
+                await result_callback([{
+                    "role": "system",
+                    "content": f"{booking_result} Thank you for scheduling with us today. Is there anything else you need??"
+                }])
+            else:
+                await result_callback([{
+                    "role": "system",
+                    "content": f"{booking_result}"
+                }])
+        except ValueError:
+            await result_callback([{
+                "role": "system",
+                "content": "I couldn't process that date or time format. Please try again."
+            }])
         
     async def save_data(self, function_name, tool_call_id, args, llm, context, result_callback):
         logger.info(f"Saving data: {args}")
