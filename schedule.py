@@ -7,7 +7,7 @@ import json
 
 class ClinicAppointment:
     def __init__(self):
-        # Hardcoded clinic settings
+        # Hardcoded clinic and patient settings
         self.working_hours = {
             'start': 10,    # 10 AM
             'end': 17,      # 5 PM
@@ -16,6 +16,8 @@ class ClinicAppointment:
         }
         self.slot_duration = 30  # minutes
         self.timezone = 'America/New_York'
+        self.patient_name = "Chad Bailey"
+        self.patient_phone = "1234567890"
         
         # Google Calendar settings from environment variables
         self.calendar_id = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
@@ -24,21 +26,16 @@ class ClinicAppointment:
     def setup_calendar(self):
         """Setup Google Calendar service using service account credentials"""
         try:
-            # Get credentials from environment variable
             credentials_json = os.getenv('GOOGLE_CREDENTIALS')
             if not credentials_json:
                 return None
             
-            # Parse the JSON string from environment variable
             credentials_info = json.loads(credentials_json)
-            
-            # Create credentials object
             credentials = service_account.Credentials.from_service_account_info(
                 credentials_info,
                 scopes=['https://www.googleapis.com/auth/calendar']
             )
             
-            # Build and return the service
             return build('calendar', 'v3', credentials=credentials)
             
         except Exception as e:
@@ -50,10 +47,9 @@ class ClinicAppointment:
         if not self.service:
             return "I apologize, but our scheduling system is currently unavailable. Please try again later."
 
-        if date.weekday() >= 5:  # Weekend check
+        if date.weekday() >= 5:
             return "I apologize, but we don't have any appointments available on weekends. Would you like to check availability for the next working day?"
 
-        # Get existing appointments
         start_time = datetime.combine(date, datetime.min.time())
         end_time = datetime.combine(date, datetime.max.time())
         
@@ -67,20 +63,17 @@ class ClinicAppointment:
         except Exception:
             return "I'm having trouble checking the calendar right now. Please try again in a moment."
 
-        # Track booked slots
         booked_times = []
         for event in events.get('items', []):
             start = datetime.fromisoformat(event['start']['dateTime'].replace('Z', ''))
             booked_times.append(start.strftime('%H:%M'))
 
-        # Generate available slots
         available_slots = []
         current_time = datetime.combine(date, datetime.min.time().replace(hour=self.working_hours['start']))
         
         while current_time.hour < self.working_hours['end']:
             time_str = current_time.strftime('%H:%M')
             
-            # Skip lunch break
             if current_time.hour == self.working_hours['lunch_start']:
                 current_time = current_time.replace(hour=self.working_hours['lunch_end'])
                 continue
@@ -98,13 +91,12 @@ class ClinicAppointment:
         
         return f"For {date.strftime('%A, %B %d')}, we have the following appointments available: {slots_text}"
 
-    def book_appointment(self, date, time_str, patient_name, phone_number):
+    def book_appointment(self, date, time_str):
         """Book an appointment for given date and time"""
         if not self.service:
             return "I apologize, but our scheduling system is currently unavailable. Please try again later."
 
         try:
-            # Handle both 24-hour and 12-hour time formats
             try:
                 time = datetime.strptime(time_str, '%H:%M').time()
             except ValueError:
@@ -113,7 +105,6 @@ class ClinicAppointment:
         except ValueError:
             return "I couldn't understand that time format. Please specify the time as either HH:MM (like 14:30) or HH:MM AM/PM (like 2:30 PM)."
 
-        # Validation checks
         if date.weekday() >= 5:
             return "I apologize, but we don't schedule appointments on weekends. Would you like to book for a weekday instead?"
 
@@ -125,7 +116,6 @@ class ClinicAppointment:
             return "I apologize, but that time falls during our lunch break from 1:00 PM to 2:00 PM. Would you like to choose a different time?"
 
         try:
-            # Check availability
             events = self.service.events().list(
                 calendarId=self.calendar_id,
                 timeMin=appointment_datetime.isoformat() + 'Z',
@@ -136,10 +126,9 @@ class ClinicAppointment:
             if events.get('items', []):
                 return f"I apologize, but the {appointment_datetime.strftime('%I:%M %p')} slot is no longer available. Would you like to check other available times?"
 
-            # Create calendar event
             event = {
-                'summary': f'Patient: {patient_name}',
-                'description': f'Phone: {phone_number}',
+                'summary': f'Patient: {self.patient_name}',
+                'description': f'Phone: {self.patient_phone}',
                 'start': {
                     'dateTime': appointment_datetime.isoformat(),
                     'timeZone': self.timezone,
@@ -154,7 +143,7 @@ class ClinicAppointment:
             return f"Great! I've booked your appointment for {date.strftime('%A, %B %d')} at {appointment_datetime.strftime('%I:%M %p')}. Please arrive 10 minutes early for your appointment. If you need to cancel or reschedule, please call us at least 24 hours in advance."
 
         except Exception as e:
-            print(f"Booking error: {str(e)}")  # For server logs
+            print(f"Booking error: {str(e)}")
             return "I'm having trouble booking the appointment right now. Please try again in a moment."
 
     def get_next_available_slots(self, start_date, num_slots=5):
