@@ -414,6 +414,14 @@ async def main():
         intake.save_data,
         start_callback=intake.start_visit_reasons
     )
+    llm.register_function(
+    "check_availability",
+    intake.check_availability
+    ) 
+    llm.register_function(
+    "book_appointment_slot",
+    intake.book_appointment_slot
+    )
 
     fl = FrameLogger("LLM Output")
 
