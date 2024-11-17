@@ -246,7 +246,7 @@ class IntakeProcessor:
         # move to finish call
         context.set_tools([])
         context.add_message(
-            {"role": "system", "content": "once the visit reasons are got call the start check_availability function"}
+            {"role": "system", "content": "once the visit reasons are got call the start start_scheduling function"}
         )
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
     async def start_appointment_scheduling(self, function_name, llm, context):
