@@ -246,7 +246,7 @@ class IntakeProcessor:
         # move to finish call
         context.set_tools([])
         context.add_message(
-            {"role": "system", "content": "Now, thank the user and end the conversation."}
+            {"role": "system", "content": "once the visit reasons are got call the start check_availability function"}
         )
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
     async def start_appointment_scheduling(self, function_name, llm, context):
@@ -421,6 +421,11 @@ async def main():
     llm.register_function(
     "book_appointment_slot",
     intake.book_appointment_slot
+    )
+    llm.register_function(
+    "start_scheduling",
+    None,  # No save_data callback needed
+    start_callback=intake.start_appointment_scheduling
     )
 
     fl = FrameLogger("LLM Output")
