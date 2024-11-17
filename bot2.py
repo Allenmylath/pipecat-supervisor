@@ -251,53 +251,53 @@ class IntakeProcessor:
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
     async def start_appointment_scheduling(self, function_name, llm, context):
     # Initialize ClinicAppointment
-    clinic = ClinicAppointment()
+        clinic = ClinicAppointment()
     
-    context.set_tools([
-        {
-            "type": "function",
-            "function": {
-                "name": "check_availability",
-                "description": "Check appointment availability for a given date",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "date": {
-                            "type": "string",
-                            "description": "The preferred date in YYYY-MM-DD format"
-                        }
-                    },
-                },
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "book_appointment_slot",
-                "description": "Book an appointment for a specific date and time",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "date": {
-                            "type": "string",
-                            "description": "The appointment date in YYYY-MM-DD format"
+        context.set_tools([
+            {
+                "type": "function",
+                "function": {
+                    "name": "check_availability",
+                    "description": "Check appointment availability for a given date",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "date": {
+                                "type": "string",
+                                "description": "The preferred date in YYYY-MM-DD format"
+                            }
                         },
-                        "time": {
-                            "type": "string",
-                            "description": "The appointment time in HH:MM format or HH:MM AM/PM format"
-                        }
                     },
-                },
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "book_appointment_slot",
+                    "description": "Book an appointment for a specific date and time",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "date": {
+                                "type": "string",
+                                "description": "The appointment date in YYYY-MM-DD format"
+                            },
+                            "time": {
+                                "type": "string",
+                                "description": "The appointment time in HH:MM format or HH:MM AM/PM format"
+                            }
+                        },
+                    },
+                }
             }
-        }
-    ])
+        ])
     
-    context.add_message({
-        "role": "system",
-        "content": "Now that we've collected your information, let's schedule your appointment. What date would you prefer for your visit?? When they provide a date, call the check_availability function with the date in YYYY-MM-DD format."
-    })
+        context.add_message({
+            "role": "system",
+            "content": "Now that we've collected your information, let's schedule your appointment. What date would you prefer for your visit?? When they provide a date, call the check_availability function with the date in YYYY-MM-DD format."
+        })
     
-    await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
     async def check_availability(self, function_name, tool_call_id, args, llm, context, result_callback):
         clinic = ClinicAppointment()
