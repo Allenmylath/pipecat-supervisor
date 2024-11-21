@@ -59,20 +59,12 @@ class Slot:
             (slot_end > lunch_start)
         )
 
-    def is_available(self) -> bool:
-        """Check if the slot is available in Google Calendar."""
-        start_time = self.datetime
-        end_time = self.datetime + timedelta(minutes=self.duration)
-
-        events_result = self.service.events().list(
-            calendarId=self.calendar_id,
-            timeMin=start_time.isoformat(),
-            timeMax=end_time.isoformat(),
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
-
-        return len(events_result.get('items', [])) == 0
+    def _overlaps_with_event(self, event_start: datetime, event_end: datetime) -> bool:
+        """Check if the slot overlaps with a given event."""
+        slot_start = self.datetime
+        slot_end = self.datetime + timedelta(minutes=self.duration)
+        
+        return (slot_start < event_end) and (slot_end > event_start)
 
     def is_valid(self) -> Tuple[bool, List[str]]:
         """Check if slot time is valid and return reasons for invalidity if any."""
@@ -112,16 +104,48 @@ class Slot:
                           business_end: time = time(17, 0),
                           duration: int = 30,
                           calendar_id: str = 'johananddijo@gmail.com') -> List['Slot']:
-        """Get all available slots for a given date."""
-        available_slots = []
-        current_time = datetime.combine(date, business_start)
-        end_time = datetime.combine(date, business_end)
+        """Get all available slots for a given date using a single API call."""
+        # Create a temporary slot object to access the calendar service
+        temp_slot = cls(
+            datetime_obj=datetime.combine(date, business_start),
+            business_start=business_start,
+            business_end=business_end,
+            duration=duration,
+            calendar_id=calendar_id
+        )
         
-        # Localize times
-        current_time = IST.localize(current_time)
-        end_time = IST.localize(end_time)
-
-        while current_time < end_time:
+        # Define the time boundaries for the day
+        day_start = datetime.combine(date, business_start)
+        day_end = datetime.combine(date, business_end)
+        
+        # Localize the times
+        day_start = IST.localize(day_start)
+        day_end = IST.localize(day_end)
+        
+        # Fetch all events for the day in a single API call
+        events_result = temp_slot.service.events().list(
+            calendarId=calendar_id,
+            timeMin=day_start.isoformat(),
+            timeMax=day_end.isoformat(),
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        # Process events into a list of busy periods
+        busy_periods = []
+        for event in events_result.get('items', []):
+            start = event['start'].get('dateTime')
+            end = event['end'].get('dateTime')
+            if start and end:
+                start_dt = datetime.fromisoformat(start).astimezone(IST)
+                end_dt = datetime.fromisoformat(end).astimezone(IST)
+                busy_periods.append((start_dt, end_dt))
+        
+        # Generate all possible slots
+        available_slots = []
+        current_time = day_start
+        
+        while current_time < day_end:
             test_slot = cls(
                 datetime_obj=current_time,
                 business_start=business_start,
@@ -129,9 +153,21 @@ class Slot:
                 duration=duration,
                 calendar_id=calendar_id
             )
+            
+            # Check if slot is valid (business hours, weekends, lunch time)
             is_valid, reasons = test_slot.is_valid()
-            if is_valid and test_slot.is_available():
-                available_slots.append(test_slot)
+            
+            if is_valid:
+                # Check if slot overlaps with any busy periods
+                is_available = True
+                for busy_start, busy_end in busy_periods:
+                    if test_slot._overlaps_with_event(busy_start, busy_end):
+                        is_available = False
+                        break
+                        
+                if is_available:
+                    available_slots.append(test_slot)
+            
             current_time += timedelta(minutes=duration)
-
+        
         return available_slots
