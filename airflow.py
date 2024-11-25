@@ -1,3 +1,7 @@
+import os
+import sys
+import subprocess
+import signal
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.models import DagRun
@@ -12,19 +16,48 @@ from typing import Dict
 
 # Create FastAPI app
 app = FastAPI(
-    title="Airflow Script Control API",
-    description="API to control script execution in Airflow",
+    title="Bot Control API",
+    description="API to control bot.py execution",
     version="1.0.0"
 )
 
-def run_script(**context):
-    """Your script logic goes here"""
-    print("Script is running...")
-    # Add your script logic here
-    while not context.get('task_instance').task.is_stopped():
-        # Your script's main loop
-        print("Processing...")
-        time.sleep(10)  # Prevent CPU overuse
+# Global variable to store the bot process
+bot_process = None
+
+def run_bot(**context):
+    """Run the bot.py script"""
+    global bot_process
+    
+    # Get the directory where this DAG file is located
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    bot_path = os.path.join(current_dir, 'bot.py')
+    
+    if not os.path.exists(bot_path):
+        raise FileNotFoundError(f"bot.py not found in {current_dir}")
+    
+    try:
+        # Start bot.py as a subprocess
+        bot_process = subprocess.Popen([sys.executable, bot_path],
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE)
+        
+        # Monitor the process
+        while not context.get('task_instance').task.is_stopped():
+            if bot_process.poll() is not None:
+                # Process has terminated
+                break
+            time.sleep(1)
+            
+        # If we get here and the process is still running, terminate it
+        if bot_process.poll() is None:
+            bot_process.terminate()
+            bot_process.wait(timeout=5)
+            
+    except Exception as e:
+        print(f"Error running bot: {str(e)}")
+        if bot_process and bot_process.poll() is None:
+            bot_process.terminate()
+        raise
 
 default_args = {
     'owner': 'airflow',
@@ -38,67 +71,75 @@ default_args = {
 
 # Define the DAG
 dag = DAG(
-    'script_control_dag',
+    'bot_control_dag',
     default_args=default_args,
-    description='DAG to control script execution',
+    description='DAG to control bot.py execution',
     schedule_interval=None,
     catchup=False
 )
 
-# Task to run the script
-run_script_task = PythonOperator(
-    task_id='run_script',
-    python_callable=run_script,
+# Task to run the bot
+run_bot_task = PythonOperator(
+    task_id='run_bot',
+    python_callable=run_bot,
     dag=dag,
 )
 
-@app.post("/start_script", response_model=Dict[str, str])
-async def start_script():
+@app.post("/start_bot", response_model=Dict[str, str])
+async def start_bot():
     """
-    Start the script by triggering the DAG
-    
-    Returns:
-        Dict containing status and message
+    Start the bot by triggering the DAG
     """
     try:
-        trigger_dag(dag_id='script_control_dag')
+        # Check if bot is already running
+        dag_runs = DagRun.find(dag_id='bot_control_dag', state='running')
+        if dag_runs:
+            return {
+                "status": "warning",
+                "message": "Bot is already running"
+            }
+            
+        trigger_dag(dag_id='bot_control_dag')
         return {
             "status": "success",
-            "message": "Script started successfully"
+            "message": "Bot started successfully"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/stop_script", response_model=Dict[str, str])
-async def stop_script():
+@app.post("/stop_bot", response_model=Dict[str, str])
+async def stop_bot():
     """
-    Stop the script by setting the stop flag
-    
-    Returns:
-        Dict containing status and message
+    Stop the bot by setting the stop flag and terminating the process
     """
+    global bot_process
     try:
-        # Get running DAG instances
-        dag_runs = DagRun.find(dag_id='script_control_dag', state='running')
+        dag_runs = DagRun.find(dag_id='bot_control_dag', state='running')
         
         if not dag_runs:
             return {
                 "status": "warning",
-                "message": "No running script instances found"
+                "message": "No running bot instances found"
             }
         
-        stopped_count = 0
+        # Stop the bot process if it exists
+        if bot_process and bot_process.poll() is None:
+            bot_process.terminate()
+            try:
+                bot_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                bot_process.kill()
+        
+        # Stop the Airflow task
         for dag_run in dag_runs:
-            # Set stop flag for the task
             task_instances = dag_run.get_task_instances()
             for ti in task_instances:
-                if ti.task_id == 'run_script':
+                if ti.task_id == 'run_bot':
                     ti.task.stop()
-                    stopped_count += 1
         
         return {
             "status": "success",
-            "message": f"Stop signal sent to {stopped_count} script instance(s)"
+            "message": "Bot stopped successfully"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -106,21 +147,34 @@ async def stop_script():
 @app.get("/status", response_model=Dict[str, str])
 async def get_status():
     """
-    Get the current status of the script
-    
-    Returns:
-        Dict containing status information
+    Get the current status of the bot
     """
+    global bot_process
     try:
-        dag_runs = DagRun.find(dag_id='script_control_dag', state='running')
-        if dag_runs:
+        dag_runs = DagRun.find(dag_id='bot_control_dag', state='running')
+        
+        # Check both DAG and process status
+        is_dag_running = bool(dag_runs)
+        is_process_running = bot_process is not None and bot_process.poll() is None
+        
+        if is_dag_running and is_process_running:
             return {
                 "status": "running",
-                "message": f"Script is running with {len(dag_runs)} active instance(s)"
+                "message": "Bot is running"
+            }
+        elif is_dag_running:
+            return {
+                "status": "warning",
+                "message": "DAG is running but bot process is not active"
+            }
+        elif is_process_running:
+            return {
+                "status": "warning",
+                "message": "Bot process is running but DAG is not active"
             }
         return {
             "status": "stopped",
-            "message": "No running instances found"
+            "message": "Bot is not running"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
