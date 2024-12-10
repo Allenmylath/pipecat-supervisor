@@ -21,7 +21,7 @@ from pipecat.services.openai import OpenAILLMContext, OpenAILLMService, OpenAILL
 from websocket_server import WebsocketServerParams, WebsocketServerTransport
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from noisereduce_filter import NoisereduceFilter
-from g import GroqSTTService
+from groqstt import GroqSTTService
 
 load_dotenv(override=True)
 
