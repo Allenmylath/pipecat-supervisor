@@ -288,7 +288,7 @@ async def main():
         model="gpt-4o"
     )
     #stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-    stt = GroqSTTService(api_key=os.getenv("GROQ_API_KEY",vad_enabled=True))
+    stt = GroqSTTService(api_key=os.getenv("GROQ_API_KEY"),vad_enabled=True)
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="829ccd10-f8b3-43cd-b8a0-4aeaa81f3b30",  # British Lady
