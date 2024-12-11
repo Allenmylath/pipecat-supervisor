@@ -1,23 +1,26 @@
 import asyncio
-from typing import AsyncGenerator, Optional, Callable, Awaitable
+from typing import AsyncGenerator, Optional, Dict, Any
 import tempfile
 import wave
 import io
 from groq import Groq
 from pipecat.frames.frames import (
-    ErrorFrame, 
-    Frame, 
+    ErrorFrame,
+    Frame,
     TranscriptionFrame,
+    AudioRawFrame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame
+    UserStoppedSpeakingFrame,
+    STTUpdateSettingsFrame,
+    STTMuteFrame
 )
 from pipecat.utils.time import time_now_iso8601
-from pipecat.services.ai_services import SegmentedSTTService
+from pipecat.services.ai_services import STTService
 from loguru import logger
 
-class GroqSTTService(SegmentedSTTService):
+class GroqSTTService(STTService):
     """GroqSTTService uses Groq's remote Whisper API to perform speech-to-text
-    transcription on audio segments with optional VAD support.
+    transcription on audio segments with VAD support.
     """
     def __init__(
         self,
@@ -27,24 +30,36 @@ class GroqSTTService(SegmentedSTTService):
         language: str = "en",
         temperature: float = 0.0,
         prompt: Optional[str] = None,
-        no_speech_prob: float = 0.4,
-        vad_enabled: bool = False,
+        sample_rate: int = 24000,
+        num_channels: int = 1,
+        audio_passthrough: bool = False,
         **kwargs
     ):
-        super().__init__(**kwargs)
+        super().__init__(audio_passthrough=audio_passthrough, **kwargs)
         self.client = Groq(api_key=api_key)
         self.model = model
         self.language = language
         self.temperature = temperature
         self.prompt = prompt
-        self._no_speech_prob = no_speech_prob
-        self._vad_enabled = vad_enabled
+        self._sample_rate = sample_rate
+        self._num_channels = num_channels
+        
+        # VAD-related state
         self._is_speaking = False
         self._current_audio_buffer = io.BytesIO()
         self._current_wave = None
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    async def set_model(self, model: str):
+        """Set the model to use for transcription."""
+        self.model = model
+        self.set_model_name(model)
+
+    async def set_language(self, language: str):
+        """Set the language for transcription."""
+        self.language = language
 
     def _initialize_wave(self):
         """Initialize a new wave file writer"""
@@ -54,13 +69,9 @@ class GroqSTTService(SegmentedSTTService):
         self._current_wave.setnchannels(self._num_channels)
         self._current_wave.setframerate(self._sample_rate)
 
-    async def process_frame(self, frame: Frame, push_frame: Callable[[Frame], Awaitable[None]]) -> None:
-        """Process incoming frames including VAD and audio frames if VAD is enabled"""
-        if not self._vad_enabled:
-            if hasattr(frame, 'audio'):
-                async for result in self.run_stt(frame.audio):
-                    await push_frame(result)
-            return
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames including VAD frames"""
+        await super().process_frame(frame, direction)
 
         if isinstance(frame, UserStartedSpeakingFrame):
             self._is_speaking = True
@@ -71,11 +82,16 @@ class GroqSTTService(SegmentedSTTService):
                 self._is_speaking = False
                 self._current_wave.close()
                 self._current_audio_buffer.seek(0)
-                async for result in self.run_stt(self._current_audio_buffer.read()):
-                    await push_frame(result)
+                if not self._muted:
+                    await self.process_generator(
+                        self.run_stt(self._current_audio_buffer.read())
+                    )
                 
-        elif hasattr(frame, 'audio') and self._is_speaking and self._current_wave:
-            self._current_wave.writeframes(frame.audio)
+        elif isinstance(frame, AudioRawFrame):
+            if self._is_speaking and self._current_wave:
+                self._current_wave.writeframes(frame.audio)
+            if self._audio_passthrough:
+                await self.push_frame(frame, direction)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Process audio data using Groq's Whisper API and yield transcription frames."""
