@@ -1,4 +1,5 @@
 import asyncio
+import io
 from typing import AsyncGenerator, Optional
 import tempfile
 import wave
