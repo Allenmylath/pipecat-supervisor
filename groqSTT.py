@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, Callable, Awaitable, Any
 import tempfile
 import wave
 import io
@@ -54,7 +54,7 @@ class GroqSTTService(SegmentedSTTService):
         self._current_wave.setnchannels(self._num_channels)
         self._current_wave.setframerate(self._sample_rate)
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame, push_frame: Callable[[Frame], Awaitable[None]]) -> None:
         """Process incoming frames including VAD and audio frames"""
         if isinstance(frame, UserStartedSpeakingFrame):
             self._is_speaking = True
@@ -66,7 +66,7 @@ class GroqSTTService(SegmentedSTTService):
                 self._current_wave.close()
                 self._current_audio_buffer.seek(0)
                 async for result in self.run_stt(self._current_audio_buffer.read()):
-                    yield result
+                    await push_frame(result)
                 
         elif hasattr(frame, 'audio') and self._is_speaking and self._current_wave:
             self._current_wave.writeframes(frame.audio)
