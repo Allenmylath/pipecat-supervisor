@@ -22,6 +22,7 @@ from websocket_server import WebsocketServerParams, WebsocketServerTransport
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from noisereduce_filter import NoisereduceFilter
 from groqstt import GroqSTTService
+from groqSTT import GroqSTTService
 
 load_dotenv(override=True)
 
