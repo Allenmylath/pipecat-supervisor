@@ -3,7 +3,6 @@ from typing import AsyncGenerator, Optional
 import tempfile
 import wave
 import io
-import numpy as np
 from groq import Groq
 from pipecat.frames.frames import (
     ErrorFrame, 
@@ -49,16 +48,16 @@ class GroqSTTService(SegmentedSTTService):
         
     def _initialize_wave(self):
         """Initialize a new wave file writer"""
+        self._current_audio_buffer = io.BytesIO()
         self._current_wave = wave.open(self._current_audio_buffer, 'wb')
         self._current_wave.setsampwidth(2)  # 16-bit audio
         self._current_wave.setnchannels(self._num_channels)
         self._current_wave.setframerate(self._sample_rate)
 
-    async def process_frame(self, frame: Frame, push_frame) -> None:
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         """Process incoming frames including VAD and audio frames"""
         if isinstance(frame, UserStartedSpeakingFrame):
             self._is_speaking = True
-            self._current_audio_buffer = io.BytesIO()
             self._initialize_wave()
             
         elif isinstance(frame, UserStoppedSpeakingFrame):
@@ -67,7 +66,7 @@ class GroqSTTService(SegmentedSTTService):
                 self._current_wave.close()
                 self._current_audio_buffer.seek(0)
                 async for result in self.run_stt(self._current_audio_buffer.read()):
-                    await push_frame(result)
+                    yield result
                 
         elif hasattr(frame, 'audio') and self._is_speaking and self._current_wave:
             self._current_wave.writeframes(frame.audio)
