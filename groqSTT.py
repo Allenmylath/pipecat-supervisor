@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncGenerator, Optional, Callable, Awaitable, Any
+from typing import AsyncGenerator, Optional, Callable, Awaitable
 import tempfile
 import wave
 import io
@@ -7,8 +7,7 @@ from groq import Groq
 from pipecat.frames.frames import (
     ErrorFrame, 
     Frame, 
-    TranscriptionFrame, 
-    SystemFrame,
+    TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame
 )
@@ -18,7 +17,7 @@ from loguru import logger
 
 class GroqSTTService(SegmentedSTTService):
     """GroqSTTService uses Groq's remote Whisper API to perform speech-to-text
-    transcription on audio segments with VAD support.
+    transcription on audio segments with optional VAD support.
     """
     def __init__(
         self,
@@ -30,7 +29,6 @@ class GroqSTTService(SegmentedSTTService):
         prompt: Optional[str] = None,
         no_speech_prob: float = 0.4,
         vad_enabled: bool = False,
-        vad_analyzer: Optional['VADAnalyzer'] = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -41,11 +39,13 @@ class GroqSTTService(SegmentedSTTService):
         self.prompt = prompt
         self._no_speech_prob = no_speech_prob
         self._vad_enabled = vad_enabled
-        self._vad_analyzer = vad_analyzer
         self._is_speaking = False
         self._current_audio_buffer = io.BytesIO()
         self._current_wave = None
-        
+
+    def can_generate_metrics(self) -> bool:
+        return True
+
     def _initialize_wave(self):
         """Initialize a new wave file writer"""
         self._current_audio_buffer = io.BytesIO()
@@ -55,7 +55,13 @@ class GroqSTTService(SegmentedSTTService):
         self._current_wave.setframerate(self._sample_rate)
 
     async def process_frame(self, frame: Frame, push_frame: Callable[[Frame], Awaitable[None]]) -> None:
-        """Process incoming frames including VAD and audio frames"""
+        """Process incoming frames including VAD and audio frames if VAD is enabled"""
+        if not self._vad_enabled:
+            if hasattr(frame, 'audio'):
+                async for result in self.run_stt(frame.audio):
+                    await push_frame(result)
+            return
+
         if isinstance(frame, UserStartedSpeakingFrame):
             self._is_speaking = True
             self._initialize_wave()
@@ -83,7 +89,7 @@ class GroqSTTService(SegmentedSTTService):
 
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=True) as temp_file:
             with wave.open(temp_file.name, 'wb') as wf:
-                wf.setsampwidth(2)
+                wf.setsampwidth(2)  # 16-bit audio
                 wf.setnchannels(self._num_channels)
                 wf.setframerate(self._sample_rate)
                 wf.writeframes(audio)
