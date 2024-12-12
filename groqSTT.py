@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
 from pipecat.utils.time import time_now_iso8601
 from pipecat.services.ai_services import STTService
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.transcriptions.language import Language
 from loguru import logger
 
 class GroqSTTService(STTService):
