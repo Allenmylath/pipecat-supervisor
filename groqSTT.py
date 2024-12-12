@@ -125,12 +125,19 @@ class GroqSTTService(STTService):
                     await self.stop_ttfb_metrics()
                     
                     if transcription and transcription.text:
-                        logger.debug(f"Transcription: [{transcription.text}]")
-                        yield TranscriptionFrame(
-                            transcription.text.strip(),
-                            "",  # No speaker ID for now
-                            time_now_iso8601()
+                        # Add detailed logging before creating the frame
+                        logger.info(f"Transcription completed. Text: '{transcription.text.strip()}'")
+                        logger.debug(f"Transcription details - Model: {self.model}, Language: {self.language}")
+                        
+                        # Create TranscriptionFrame with all required fields
+                        frame = TranscriptionFrame(
+                            text=transcription.text.strip(),
+                            user_id="",  # User ID should be set based on your application's user tracking
+                            timestamp=time_now_iso8601(),
+                            language=Language(self.language) if self.language else None
                         )
+                        logger.debug(f"Created transcription frame: {str(frame)}")
+                        yield frame
                     
                 except Exception as e:
                     logger.error(f"Error during Groq transcription: {str(e)}")
