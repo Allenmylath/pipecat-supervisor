@@ -12,7 +12,8 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     STTUpdateSettingsFrame,
-    STTMuteFrame
+    STTMuteFrame,
+    TextFrame
 )
 from pipecat.utils.time import time_now_iso8601
 from pipecat.services.ai_services import STTService
@@ -74,7 +75,7 @@ class GroqSTTService(STTService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames including VAD frames"""
     # First pass through any non-audio frame that isn't VAD related
-        if not isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame, AudioRawFrame)):
+        if not isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame, AudioRawFrame,TextFrame)):
             await self.push_frame(frame, direction)
             return
 
