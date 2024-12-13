@@ -22,7 +22,7 @@ from websocket_server import WebsocketServerParams, WebsocketServerTransport
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from noisereduce_filter import NoisereduceFilter
 #from groqstt import GroqSTTService
-from groqSTT import GroqSTTService
+from groqSTT import GroqVADSTTService
 
 load_dotenv(override=True)
 
@@ -288,11 +288,15 @@ async def main():
         model="gpt-4o"
     )
     #stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-    stt = GroqSTTService(
-    api_key=os.getenv("GROQ_API_KEY"),
-    sample_rate=16000,
-    min_audio_length=4000,  # Adjust this if needed
-    temperature=0.0
+    stt = GroqVADSTTService(
+    api_key=os.getenv("GROQ_API_KEY"),  # Get API key from environment variable
+    model="whisper-large-v3",           # Default Whisper model
+    language="en",                      # English language
+    temperature=0.0,                    # No temperature for deterministic output
+    sample_rate=16000,                  # Standard sample rate for Whisper
+    num_channels=1,                     # Mono audio
+    vad_threshold=0.5,                  # VAD detection threshold
+    audio_passthrough=False             # Don't pass through audio frames
     )
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
