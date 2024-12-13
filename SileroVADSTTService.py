@@ -6,7 +6,7 @@ import importlib.resources
 from typing import Tuple
 
 from pipecat.services.ai_services import STTService
-from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame, AudioRawFrame
+from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame, AudioRawFrame, EndFrame
 
 class SileroVADSTTService(STTService):
     """STTService that uses Silero VAD (ONNX) for speech detection before running
