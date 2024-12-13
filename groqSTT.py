@@ -28,10 +28,10 @@ class GroqSTTService(STTService):
         model: str = "whisper-large-v3",
         language: str = "en",
         temperature: float = 0.0,
-        sample_rate: int = 16000,  # Changed default to 16kHz
+        sample_rate: int = 16000,
         num_channels: int = 1,
         audio_passthrough: bool = False,
-        min_audio_length: int = 4000,  # Minimum audio length in bytes
+        min_audio_length: int = 4000,
         **kwargs
     ):
         super().__init__(audio_passthrough=audio_passthrough, **kwargs)
@@ -47,6 +47,18 @@ class GroqSTTService(STTService):
         self._is_speaking = False
         self._current_audio_buffer = None
         self._current_wave = None
+
+    def can_generate_metrics(self) -> bool:
+        return True
+
+    async def set_model(self, model: str):
+        """Set the model for transcription."""
+        self.model = model
+        self.set_model_name(model)
+
+    async def set_language(self, language: str):
+        """Set the language for transcription."""
+        self.language = language
         
     def _initialize_wave(self):
         """Initialize wave file writer with 16-bit PCM format"""
@@ -113,9 +125,10 @@ class GroqSTTService(STTService):
             
             try:
                 with open(temp_file.name, 'rb') as audio_file:
+                    file_content = audio_file.read()
                     transcription = await asyncio.to_thread(
                         self.client.audio.transcriptions.create,
-                        file=temp_file.name,
+                        file=("audio.wav", file_content),  # Fixed file handling
                         model=self.model,
                         language=self.language,
                         temperature=self.temperature,
@@ -127,9 +140,9 @@ class GroqSTTService(STTService):
                     if transcription and hasattr(transcription, 'text'):
                         text = transcription.text.strip()
                         
-                        # Basic validation
+                        # Validate transcription
                         if text and len(text) > 1:
-                            logger.info(f"Transcription: '{text}'")
+                            logger.info(f"Transcription completed: '{text}'")
                             
                             frame = TranscriptionFrame(
                                 text=text,
