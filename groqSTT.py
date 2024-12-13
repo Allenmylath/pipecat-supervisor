@@ -75,7 +75,7 @@ class GroqSTTService(STTService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames including VAD frames"""
     # First pass through any non-audio frame that isn't VAD related
-        if not isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame, AudioRawFrame,TextFrame)):
+        if not isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame, AudioRawFrame)):
             await self.push_frame(frame, direction)
             return
 
