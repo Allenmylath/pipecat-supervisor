@@ -72,29 +72,41 @@ class GroqSTTService(STTService):
         self._current_wave.setframerate(self._sample_rate)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process incoming frames including VAD frames"""
-        await super().process_frame(frame, direction)
+    """Process incoming frames including VAD frames"""
+    # First pass through any non-audio frame that isn't VAD related
+        if not isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame, AudioRawFrame)):
+            await self.push_frame(frame, direction)
+            return
 
+        await super().process_frame(frame, direction)
+    
         if isinstance(frame, UserStartedSpeakingFrame):
             self._is_speaking = True
             self._initialize_wave()
-            
+        
         elif isinstance(frame, UserStoppedSpeakingFrame):
             if self._is_speaking and self._current_wave:
                 self._is_speaking = False
                 self._current_wave.close()
                 self._current_audio_buffer.seek(0)
+            
                 if not self._muted:
-                    await self.process_generator(
-                        self.run_stt(self._current_audio_buffer.read())
-                    )
-                
+                    audio_data = self._current_audio_buffer.read()
+                    await self.process_generator(self.run_stt(audio_data))
+            
+                # Cleanup
+                self._current_wave = None
+                self._current_audio_buffer = None
+            
         elif isinstance(frame, AudioRawFrame):
+        # Handle audio collection if speaking
             if self._is_speaking and self._current_wave:
                 self._current_wave.writeframes(frame.audio)
+        
+            # Handle audio passthrough regardless of speaking state
             if self._audio_passthrough:
                 await self.push_frame(frame, direction)
-
+                
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Process audio data using Groq's Whisper API and yield transcription frames."""
         if not self.client:
