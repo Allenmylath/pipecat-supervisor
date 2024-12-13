@@ -8,12 +8,13 @@ from typing import AsyncGenerator, Optional, Tuple
 from groq import Groq
 import tempfile
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame, AudioRawFrame
+from pipecat.services.ai_services import STTService
 from pipecat.utils.time import time_now_iso8601
 from pipecat.transcriptions.language import Language
 from pipecat.processors.frame_processor import FrameDirection
 from loguru import logger
 
-class GroqVADSTTService(GroqSTTService):
+class GroqVADSTTService(STTService):
     """GroqSTTService that uses Silero VAD for speech detection before running
     speech-to-text on detected speech segments.
     """
