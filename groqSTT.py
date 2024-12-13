@@ -13,8 +13,9 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.transcriptions.language import Language
 from pipecat.processors.frame_processor import FrameDirection
 from loguru import logger
+from SileroVADSTTService import SileroVADSTTService
 
-class GroqVADSTTService(STTService):
+class GroqVADSTTService(SileroVADSTTService):
     """GroqSTTService that uses Silero VAD for speech detection before running
     speech-to-text on detected speech segments.
     """
