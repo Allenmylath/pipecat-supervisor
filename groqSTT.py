@@ -72,7 +72,7 @@ class GroqSTTService(STTService):
         self._current_wave.setframerate(self._sample_rate)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-    """Process incoming frames including VAD frames"""
+        """Process incoming frames including VAD frames"""
     # First pass through any non-audio frame that isn't VAD related
         if not isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame, AudioRawFrame)):
             await self.push_frame(frame, direction)
