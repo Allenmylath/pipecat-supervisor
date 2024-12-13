@@ -5,6 +5,8 @@ import onnxruntime
 import importlib.resources
 from typing import Tuple
 
+from pipecat.services.ai_services import STTService
+
 class SileroVADSTTService(STTService):
     """STTService that uses Silero VAD (ONNX) for speech detection before running
     speech-to-text on detected speech segments.
