@@ -279,7 +279,7 @@ async def main():
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
-            audio_in_filter=NoisereduceFilter(),
+            #audio_in_filter=NoisereduceFilter(),
         )
     )
 
