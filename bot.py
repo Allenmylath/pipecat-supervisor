@@ -279,7 +279,7 @@ async def main():
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
-            #audio_in_filter=NoisereduceFilter(),
+            audio_in_filter=NoisereduceFilter(),
         )
     )
 
@@ -287,17 +287,8 @@ async def main():
         api_key=os.getenv("OPENAI_API_KEY"),
         model="gpt-4o"
     )
-    #stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-    stt = GroqVADSTTService(
-    api_key=os.getenv("GROQ_API_KEY"),  # Get API key from environment variable
-    model="whisper-large-v3",           # Default Whisper model
-    language="en",                      # English language
-    temperature=0.0,                    # No temperature for deterministic output
-    sample_rate=16000,                  # Standard sample rate for Whisper
-    num_channels=1,                     # Mono audio
-    vad_threshold=0.5,                  # VAD detection threshold
-    audio_passthrough=False             # Don't pass through audio frames
-    )
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="829ccd10-f8b3-43cd-b8a0-4aeaa81f3b30",  # British Lady
